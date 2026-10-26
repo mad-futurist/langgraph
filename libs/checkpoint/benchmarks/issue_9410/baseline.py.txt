@@ -1,0 +1,230 @@
+def _msgpack_default(obj: Any) -> str | ormsgpack.Ext:
+    if isinstance(obj, _DeltaSnapshot):
+        return ormsgpack.Ext(EXT_DELTA_SNAPSHOT, _msgpack_enc(obj.value))
+    elif hasattr(obj, "model_dump") and callable(obj.model_dump):  # pydantic v2
+        return ormsgpack.Ext(
+            EXT_PYDANTIC_V2,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj.model_dump(),
+                    "model_validate_json",
+                ),
+            ),
+        )
+    elif hasattr(obj, "get_secret_value") and callable(obj.get_secret_value):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj.get_secret_value(),
+                ),
+            ),
+        )
+    elif hasattr(obj, "dict") and callable(obj.dict):  # pydantic v1
+        return ormsgpack.Ext(
+            EXT_PYDANTIC_V1,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj.dict(),
+                ),
+            ),
+        )
+    elif hasattr(obj, "_asdict") and callable(obj._asdict):  # namedtuple
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_KW_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj._asdict(),
+                ),
+            ),
+        )
+    elif isinstance(obj, pathlib.Path):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, obj.parts),
+            ),
+        )
+    elif isinstance(obj, re.Pattern):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                ("re", "compile", (obj.pattern, obj.flags)),
+            ),
+        )
+    elif isinstance(obj, UUID):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, obj.hex),
+            ),
+        )
+    elif isinstance(obj, decimal.Decimal):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, str(obj)),
+            ),
+        )
+    elif isinstance(obj, (set, frozenset, deque)):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, tuple(obj)),
+            ),
+        )
+    elif isinstance(obj, (IPv4Address, IPv4Interface, IPv4Network)):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, str(obj)),
+            ),
+        )
+    elif isinstance(obj, (IPv6Address, IPv6Interface, IPv6Network)):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, str(obj)),
+            ),
+        )
+    elif isinstance(obj, datetime):
+        return ormsgpack.Ext(
+            EXT_METHOD_SINGLE_ARG,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj.isoformat(),
+                    "fromisoformat",
+                ),
+            ),
+        )
+    elif isinstance(obj, timedelta):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    (obj.days, obj.seconds, obj.microseconds),
+                ),
+            ),
+        )
+    elif isinstance(obj, date):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    (obj.year, obj.month, obj.day),
+                ),
+            ),
+        )
+    elif isinstance(obj, time):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_KW_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    {
+                        "hour": obj.hour,
+                        "minute": obj.minute,
+                        "second": obj.second,
+                        "microsecond": obj.microsecond,
+                        "tzinfo": obj.tzinfo,
+                        "fold": obj.fold,
+                    },
+                ),
+            ),
+        )
+    elif isinstance(obj, timezone):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    obj.__getinitargs__(),  # type: ignore[attr-defined]
+                ),
+            ),
+        )
+    elif isinstance(obj, ZoneInfo):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, obj.key),
+            ),
+        )
+    elif isinstance(obj, Enum):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_SINGLE_ARG,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, obj.value),
+            ),
+        )
+    elif isinstance(obj, SendProtocol):
+        args: tuple[Any, ...] = (obj.node, obj.arg)
+        if (timeout := getattr(obj, "timeout", None)) is not None:
+            args = (obj.node, obj.arg, timeout)
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_POS_ARGS,
+            _msgpack_enc(
+                (obj.__class__.__module__, obj.__class__.__name__, args),
+            ),
+        )
+    elif dataclasses.is_dataclass(obj):
+        # doesn't use dataclasses.asdict to avoid deepcopy and recursion
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_KW_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    {
+                        field.name: getattr(obj, field.name)
+                        for field in dataclasses.fields(obj)
+                    },
+                ),
+            ),
+        )
+    elif isinstance(obj, Item):
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_KW_ARGS,
+            _msgpack_enc(
+                (
+                    obj.__class__.__module__,
+                    obj.__class__.__name__,
+                    {k: getattr(obj, k) for k in obj.__slots__},
+                ),
+            ),
+        )
+    elif (np_mod := sys.modules.get("numpy")) is not None and isinstance(
+        obj, np_mod.ndarray
+    ):
+        order = "F" if obj.flags.f_contiguous and not obj.flags.c_contiguous else "C"
+        if obj.flags.c_contiguous:
+            mv = memoryview(obj)
+            try:
+                meta = (obj.dtype.str, obj.shape, order, mv)
+                return ormsgpack.Ext(EXT_NUMPY_ARRAY, _msgpack_enc(meta))
+            finally:
+                mv.release()
+        else:
+            buf = obj.tobytes(order="A")
+            meta = (obj.dtype.str, obj.shape, order, buf)
+            return ormsgpack.Ext(EXT_NUMPY_ARRAY, _msgpack_enc(meta))
+
+    elif isinstance(obj, BaseException):
+        return repr(obj)
+    else:
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not serializable")
